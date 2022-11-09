@@ -1,11 +1,14 @@
 use std::io;
+use std::fs;
+use std::fs::File;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use serde::{Serialize, Deserialize};
 
 fn main() {
     println!("\n### Lets manage your todolist! ### \n");
 
-    let mut todolist = ToDoList::new().expect("Initialisation of db failed");
+    let mut todolist = ToDoList::new();
     todolist.help();
 
     loop {
@@ -48,16 +51,32 @@ fn main() {
     }
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 struct ToDoList {
     list: Vec<ToDo>,
 }
 
+#[allow(unused_must_use)]
 impl ToDoList {
-    fn new() -> Result<ToDoList, std::io::Error> {
-        Ok(ToDoList { 
-            list: vec![]
-        })
+    fn new() -> ToDoList {
+        let dbfile = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .read(true)
+            .open("db.json")
+            .expect("Failed to get dbfile");
+
+        match serde_json::from_reader::<File, Vec<ToDo>>(dbfile) {
+            
+            // File json decoded successfully
+            Ok(todo) => ToDoList { list: todo },
+            
+            // File json unsuccess to decoded
+            Err(e) if e.is_eof() => ToDoList { list: vec![] },
+            
+            // Other error
+            _ => panic!("error while reading json"),
+        }
     }
 
     fn help(&self) {
@@ -108,28 +127,87 @@ impl ToDoList {
         (action, item_name)
     }
 
+    fn save(&self) {
+        let dbfile = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .read(true)
+            .open("db.json")
+            .expect("Failed to get dbfile");
+
+        serde_json::to_writer_pretty(dbfile, &self.list);
+    }
+
     fn add(&mut self, item_name: &str) {
+        self.list.push( ToDo {
+            name: String::from(item_name),
+            status: String::from("waiting")
+        } );
+
         println!("Add '{}' to todolist", item_name);
+
+        self.save();
     }
 
     fn process(&mut self, item_name: &str) {
-        println!("Process '{}' from todolist", item_name);
+        for item in &mut self.list {
+            if item.name == item_name {
+                item.status = String::from("progress");
+            }
+        }
+
+        println!("Processing todolist '{}'", item_name);
+
+        self.save();
     }
 
     fn pause(&mut self, item_name: &str) {
-        println!("Pause '{}' from todolist", item_name);
+        for item in &mut self.list {
+            if item.name == item_name {
+                item.status = String::from("paused");
+            }
+        }
+
+        println!("Pausing '{}' from todolist", item_name);
+
+        self.save();
     }
 
     fn done(&mut self, item_name: &str) {
+        for item in &mut self.list {
+            if item.name == item_name {
+                item.status = String::from("finish");
+            }
+        }
+
         println!("Set todolist '{}' to be 'Done'", item_name);
+
+        self.save();
     }
 
     fn remove(&mut self, item_name: &str) {
+        let mut new_list: Vec<ToDo> = Vec::new();
+        for item in &self.list {
+            if item.name != item_name {
+                let new_item = ToDo {
+                    name: String::from(&item.name), 
+                    status: String::from(&item.status)
+                };
+                new_list.push(new_item);
+            }
+        }
+
+        self.list = new_list;
+
         println!("Remove todolist '{}' from todolist", item_name);
+
+        self.save();
     }
 
     fn status(&self) {
-        println!("You choose to 'Status' action");
+        for item in &self.list {
+            println!("{:<20} {}", item.status, item.name);
+        }
     }
 }
 
@@ -146,29 +224,8 @@ enum ToDoActions {
     Unknown
 }
 
-#[derive(Debug)]
-struct ToDoAction {
-    key: ToDoActions,
-    example: String,
-    desc: String,
-}
-
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 struct ToDo {
     name: String,
     status: String,
-}
-
-impl ToDo {
-    fn process(&mut self) {
-        self.status = "progress".to_string()
-    }
-
-    fn pause(&mut self) {
-        self.status = "paused".to_string()
-    }
-
-    fn done(&mut self) {
-        self.status = "finish".to_string()
-    }
 }
